@@ -37,6 +37,14 @@ class QLearningAgent:
         return self._argmax(self.q[state])
 
     def update(self, state, action, reward, next_state, done: bool):
+        """Update tabular de Q-learning.
+
+        Importante: `done` debe ser `terminated` (el episodio acabó por un
+        estado terminal real), NO `terminated or truncated`. Truncar por
+        `max_steps` no es un estado terminal: el bootstrap `max_a' Q(s',a')`
+        debe seguir computándose, de lo contrario el agente aprende a evitar
+        estados que están cerca del límite de pasos aunque sean buenos.
+        """
         best_next = 0.0 if done else max(self.q[next_state])
         target = reward + self.gamma * best_next
         self.q[state][action] += self.alpha * (target - self.q[state][action])
@@ -80,10 +88,16 @@ class QLearningAgent:
 
     @staticmethod
     def _argmax(values: list[float]) -> int:
-        best = 0
-        best_val = values[0]
-        for i in range(1, len(values)):
-            if values[i] > best_val:
-                best_val = values[i]
-                best = i
-        return best
+        """Argmax con desempate aleatorio.
+
+        Evita ciclos en políticas greedy deterministas: cuando varias
+        acciones empatan en Q-valor (típico al inicio del aprendizaje y en
+        estados poco visitados), tomar siempre el primer índice produce
+        secuencias periódicas que nunca exploran salidas. La aleatoriedad
+        en el desempate las rompe.
+        """
+        best_val = max(values)
+        best_idxs = [i for i, v in enumerate(values) if v == best_val]
+        if len(best_idxs) == 1:
+            return best_idxs[0]
+        return random.choice(best_idxs)

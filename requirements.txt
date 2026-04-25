@@ -1,4 +1,5 @@
-gymnasium
-minigrid
 numpy
 matplotlib
+pillow
+jupyter
+nbconvert
