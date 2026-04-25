@@ -1,6 +1,6 @@
-# Proyecto RL — DoorKey
+# Proyecto RL — Laberinto
 
-Agente de Q-learning tabular para resolver un ambiente tipo MiniGrid con dos habitaciones separadas por una puerta con llave. El agente debe retirar una bola que bloquea la puerta, recoger la llave, abrir la puerta y llegar a la casilla objetivo.
+Agente de Q-learning tabular para resolver un laberinto rectangular de 8×7 celdas con muros internos, definido por el archivo del enunciado (`data/project_lab_v2.txt`). El agente parte de la celda `(6, 0)` y debe llegar a la meta `(1, 6)` minimizando el número de pasos.
 
 ## Instalación
 
@@ -10,17 +10,35 @@ pip install -r requirements.txt
 
 ## Uso
 
-El entrenamiento y la evaluación se ejecutan desde los notebooks en `notebooks/`:
+El flujo del proyecto vive en los notebooks de `notebooks/`:
 
-- `exploration.ipynb` — exploración del ambiente y pruebas rápidas.
-- `experiments.ipynb` — entrenamiento, evaluación y análisis.
+- **`01_exploration.ipynb`** — carga el laberinto, lo visualiza, calcula el camino óptimo con BFS (referencia de evaluación) y prueba la API del ambiente con acciones manuales.
+- **`02_experiments.ipynb`** — entrena el agente Q-learning, guarda la Q-tabla, genera la curva de aprendizaje, evalúa la política greedy y graba un GIF del episodio.
 
-El código reutilizable (ambiente y agente) vive en `src/` y se importa desde los notebooks.
+El código reutilizable vive en `src/`:
+
+- `src/maze.py` — parser del archivo del laberinto, geometría (`Maze`) y ambiente Q-learning (`MazeEnv`).
+- `src/agent.py` — implementación del agente Q-learning tabular con persistencia.
 
 ## Estructura
 
-- `src/` — ambiente y agente (código reutilizable).
-- `notebooks/` — experimentación.
-- `docs/` — entregas parcial y final.
-- `results/` — Q-tablas, logs y gráficas.
-- `video/` — demo final.
+```
+Proyecto/
+├── data/
+│   └── project_lab_v2.txt       # archivo del enunciado (definición del laberinto)
+├── src/
+│   ├── maze.py
+│   └── agent.py
+├── notebooks/
+│   ├── 01_exploration.ipynb
+│   └── 02_experiments.ipynb
+├── docs/
+│   └── partial.md               # entrega parcial: caracterización (estados, acciones, recompensa)
+├── results/                     # Q-tabla, curvas, gráficas
+├── video/                       # GIF de la demo greedy
+└── _archive/                    # iteraciones anteriores del proyecto (referencia histórica)
+```
+
+## Entregas
+
+- **Entrega parcial (semana 5)**: `docs/partial.md`. Caracterización completa del problema según los tres requisitos del enunciado (definición del conjunto de estados, definición de acciones con su aplicabilidad, función de recompensa con valores numéricos por situación).
