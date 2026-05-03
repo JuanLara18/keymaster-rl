@@ -1,88 +1,112 @@
 # Entrega parcial — Caracterización del problema
 
+> Enunciado vigente: post del profesor Nicolás Cardozo en el foro *Insumos proyecto* (18 de marzo, 2026), que actualiza la versión inicial del proyecto y entrega el archivo `data/project_lab_v2.txt` junto con la imagen de referencia del laberinto.
+
 ## Descripción del ambiente
 
-El ambiente es un laberinto rectangular de **8 filas × 7 columnas (56 celdas)** con muros internos que bloquean transiciones entre celdas adyacentes. La geometría se carga desde el archivo `data/project_lab_v2.txt` provisto en el enunciado, que define:
+Laberinto rectangular de **8 filas × 7 columnas (56 celdas)** con muros internos que bloquean transiciones entre celdas adyacentes. La geometría se carga desde `data/project_lab_v2.txt`, cuyo formato es:
 
-- Línea 1: dimensiones `nrows ncols = 8 7`.
-- Línea 2: número de muros `nwalls = 65`.
-- Líneas siguientes: cada una un segmento de muro `x1 y1 x2 y2` en el espacio de esquinas, donde `X` es fila (vertical, 0 arriba) y `Y` es columna (horizontal, 0 a la izquierda) — convención idéntica a la imagen del enunciado.
+- Línea 1: dimensiones $n_{\text{filas}}\, n_{\text{cols}} = 8\ 7$.
+- Línea 2: número total de segmentos de muro $n_{\text{walls}} = 65$.
+- Líneas siguientes: cada una un segmento $x_1\ y_1\ x_2\ y_2$ en el espacio de **esquinas**, donde $X$ indexa filas (vertical, $0$ arriba) y $Y$ indexa columnas (horizontal, $0$ a la izquierda) — convención idéntica a la imagen del enunciado.
 
-De los 65 segmentos, **37 son muros internos** (separan dos celdas válidas) y los 28 restantes son borde exterior, que el chequeo de límites ya cubre.
+De los 65 segmentos, **37 son muros internos** (separan dos celdas válidas) y los 28 restantes pertenecen al borde exterior, que el chequeo de límites ya cubre.
 
-| Elemento     | Valor    |
-|--------------|----------|
-| Celda inicial (start) | `(6, 0)` |
-| Celda meta (goal)     | `(1, 6)` |
-| Camino óptimo (BFS)   | 25 pasos |
+| Elemento | Valor |
+|---|---|
+| Celda inicial $s_0$ | $(6,\,0)$ |
+| Celda meta $s_T$ | $(1,\,6)$ |
+| Distancia Manhattan $s_0 \to s_T$ | $11$ |
+| Camino óptimo (BFS sobre el grafo) | $25$ pasos |
 
-El agente debe llegar de `start` a `goal` minimizando el número de pasos. El ambiente es **determinista**: una misma acción desde el mismo estado siempre produce la misma transición.
+El ambiente es **determinista** y **completamente observable**: una misma acción desde el mismo estado produce siempre la misma transición, y el agente conoce su posición exacta. El objetivo es llegar de $s_0$ a $s_T$ minimizando el número de pasos.
+
+Formalmente lo modelamos como un MDP episódico $(\mathcal{S},\, \mathcal{A},\, T,\, r,\, \gamma)$ con estado terminal $s_T$. Las tres componentes que pide la entrega ($\mathcal{S}$, $\mathcal{A}$, $r$) se detallan a continuación.
 
 ## 1. Conjunto de estados
 
-El estado se codifica como una tupla hashable `(row, col)` apta para indexar la Q-tabla:
+El estado se codifica como una tupla $(x, y)$ con la posición del agente en la grilla:
 
-| Componente | Tipo  | Rango     | Descripción                                    |
-|------------|-------|-----------|------------------------------------------------|
-| `row`      | `int` | `0..7`    | Fila de la celda donde está el agente          |
-| `col`      | `int` | `0..6`    | Columna de la celda donde está el agente       |
+| Componente | Tipo | Rango | Descripción |
+|---|---|---|---|
+| $x$ | `int` | $\{0, 1, \dots, 7\}$ | Fila de la celda donde está el agente |
+| $y$ | `int` | $\{0, 1, \dots, 6\}$ | Columna de la celda donde está el agente |
 
-- **Tamaño total del espacio de estados**: `|S| = 8 × 7 = 56`.
-- **Estado inicial**: `s₀ = (6, 0)` (fijo en cada episodio).
-- **Estado terminal**: `s_T = (1, 6)` (alcanzar esta celda termina el episodio con éxito).
-- **Otras características**:
-  - El estado captura toda la información Markoviana relevante: el agente no necesita recordar la trayectoria pasada porque la geometría del laberinto y la regla de transición dependen solo de `(row, col)` y de la acción.
-  - No hay observabilidad parcial: el agente conoce su posición exacta.
+$$\mathcal{S} = \{(x, y) : 0 \le x < 8,\ 0 \le y < 7\}, \qquad |\mathcal{S}| = 8 \times 7 = 56.$$
+
+- **Estado inicial**: $s_0 = (6, 0)$, fijo en cada episodio.
+- **Estado terminal**: $s_T = (1, 6)$. Alcanzar esta celda termina el episodio exitosamente.
+- **Propiedad de Markov**: el par $(x, y)$ es información suficiente para decidir, porque la geometría del laberinto y la regla de transición dependen únicamente del estado actual y de la acción ejecutada — no se requiere historial.
+
+La representación es directamente indexable y se usa como clave de la Q-tabla.
 
 ## 2. Conjunto de acciones
 
-El agente dispone de **4 acciones discretas** correspondientes a movimientos en la grilla a 4-conexa:
+El agente dispone de **4 acciones discretas** correspondientes a movimientos a 4-conexa en la grilla:
 
-| Índice | Nombre  | Δ (fila, col) | Aplicabilidad |
-|--------|---------|---------------|---------------|
-| 0      | `UP`    | `(-1, 0)`     | Siempre ejecutable |
-| 1      | `DOWN`  | `(+1, 0)`     | Siempre ejecutable |
-| 2      | `LEFT`  | `(0, -1)`     | Siempre ejecutable |
-| 3      | `RIGHT` | `(0, +1)`     | Siempre ejecutable |
+$$\mathcal{A} = \{\text{UP},\ \text{DOWN},\ \text{LEFT},\ \text{RIGHT}\}, \qquad |\mathcal{A}| = 4.$$
 
-**Semántica de "aplicabilidad"**: las cuatro acciones están disponibles desde cualquier estado. Lo que cambia es el efecto de la acción:
+Cada acción tiene asociado un desplazamiento $\Delta_a \in \mathbb{Z}^2$:
 
-- Si la celda destino (`s + Δa`) está **dentro de los límites** del laberinto **y** no hay muro entre la celda origen `s` y la celda destino, la transición se realiza: `s' = s + Δa`.
-- En caso contrario (intento de salir del grid o muro bloqueante), el agente **permanece en `s`** (`s' = s`). Llamamos a esto un *bump*: la acción se "ejecutó" pero no produjo desplazamiento.
+| Índice | Acción | $\Delta_a = (\Delta x,\, \Delta y)$ |
+|:---:|:---:|:---:|
+| 0 | UP    | $(-1,\ 0)$ |
+| 1 | DOWN  | $(+1,\ 0)$ |
+| 2 | LEFT  | $(0,\ -1)$ |
+| 3 | RIGHT | $(0,\ +1)$ |
 
-Esta política — acciones siempre disponibles, transiciones inválidas mapeadas a no-op — simplifica la Q-tabla (no hay máscaras de acción por estado) y es estándar en gridworlds de RL.
+### Aplicabilidad
+
+Las cuatro acciones están **disponibles desde cualquier estado** $s \in \mathcal{S}$. Lo que varía con el estado no es la disponibilidad sino el efecto:
+
+$$
+T(s, a) =
+\begin{cases}
+s + \Delta_a & \text{si } s + \Delta_a \in \mathcal{S} \text{ y no hay muro entre } s \text{ y } s + \Delta_a, \\
+s & \text{en caso contrario (intento fuera del grid o muro bloqueante).}
+\end{cases}
+$$
+
+Cuando la transición devuelve $s$ (la acción no produjo desplazamiento) decimos que ocurrió un *bump*: la acción se "ejecutó" pero el agente permaneció en su celda. Esta convención —acciones siempre aplicables, transiciones inválidas mapeadas a *no-op*— evita máscaras de acción por estado y es estándar en gridworlds tabulares.
 
 ## 3. Función de recompensa
 
-La recompensa se modela como `r(s, a, s')` (depende de la transición). Sólo dos situaciones son distintas:
+La recompensa depende exclusivamente del estado destino de la transición:
 
-| Situación                                    | Recompensa | Comentario |
-|----------------------------------------------|-----------:|------------|
-| `s' = goal` (la transición lleva a la meta)  |   **+100** | Episodio termina exitosamente |
-| `s' ≠ goal` (cualquier otra transición)      |    **−1**  | Costo de paso. Aplica también al *bump* (la celda destino bloqueada deja `s' = s`, sigue costando −1) |
+$$
+r(s, a, s') =
+\begin{cases}
++100 & \text{si } s' = s_T, \\
+-1   & \text{en cualquier otro caso.}
+\end{cases}
+$$
 
-**Pareja estado-acción explícita** (forma equivalente para la rúbrica del enunciado):
+### Situaciones explícitas (parejas $(s, a)$)
 
-| `(s, a)`                                                        | `s'`                  | `r` |
-|-----------------------------------------------------------------|-----------------------|----:|
-| `s` adyacente al goal con `a` orientada hacia el goal           | `goal`                |  +100 |
-| `s` con `a` que produce desplazamiento válido (no es al goal)   | `s + Δa`              |  −1 |
-| `s` con `a` que sale del grid o cruza un muro                   | `s` (bump)            |  −1 |
+Toda transición desde un estado no terminal cae en exactamente uno de estos tres casos:
+
+| # | Situación | $s'$ resultante | $r$ |
+|:---:|---|---|---:|
+| (i)  | $s$ adyacente a $s_T$, $a$ orienta hacia $s_T$ y no hay muro entre ambos | $s_T$ | $+100$ |
+| (ii) | $a$ produce un desplazamiento válido a una celda distinta de $s_T$ | $s + \Delta_a$ | $-1$ |
+| (iii)| $a$ intenta salir del grid o cruzar un muro (*bump*) | $s$ | $-1$ |
+
+Los casos (ii) y (iii) tienen la misma recompensa pero distinto $s'$; los separamos porque la rúbrica pide enumerar las situaciones de forma explícita.
 
 ### Justificación del diseño
 
-- **Costo de paso negativo**: la única forma de maximizar el retorno acumulado es minimizar la cantidad de pasos. Sin costo de paso, todas las políticas que eventualmente llegan al goal serían óptimas; con `-1` por paso, sólo lo es la trayectoria más corta.
-- **Recompensa terminal grande (+100) frente al costo de paso (-1)**: garantiza que la señal terminal domina sobre los costos acumulados (incluso un episodio que rebote 99 veces antes de llegar al goal recibe retorno positivo, lo que evita que el agente "evite" llegar). Para el camino óptimo de 25 pasos el retorno es `24·(-1) + 100 = +76`; el peor caso truncado a 200 pasos da `-200`.
-- **Choque sin penalización adicional**: el costo de paso ya penaliza implícitamente al *bump* (es un paso desperdiciado). Agregar una penalización extra aceleraría el aprendizaje pero complicaría el modelo de recompensa sin necesidad para un ambiente de este tamaño (56 estados convergen rápido).
-- **Ningún reward shaping intermedio** (por ejemplo, bonificación por acercarse a la meta): la formulación es la canónica de gridworld con costo uniforme de paso, lo que mantiene la política óptima alineada exactamente con el camino BFS más corto y facilita la verificación.
+- **Costo de paso $-1$.** La única manera de maximizar el retorno es minimizar el número de pasos. Sin él, cualquier política que eventualmente llegue al goal sería óptima; con el costo, la única política óptima es la trayectoria más corta.
+- **Recompensa terminal $+100$ frente al costo $-1$.** Asegura que la señal terminal domina aun cuando el episodio sea largo: en el camino óptimo de 25 pasos el retorno es $24\cdot(-1) + 100 = +76$, mientras que el peor caso truncado a 200 pasos da $-200$. La diferencia mantiene gradiente positivo hacia el goal.
+- **Bump sin penalización adicional.** El costo de paso ya penaliza el *bump* implícitamente (es un paso desperdiciado). Una penalización extra aceleraría la convergencia pero introduciría un hiperparámetro innecesario para un ambiente de 56 estados, donde el algoritmo ya converge en miles de episodios.
+- **Sin *reward shaping* intermedio** (por ejemplo, bonus por acercarse al goal). Mantenemos la formulación canónica de gridworld para que la política óptima coincida exactamente con el camino BFS más corto — eso facilita validar al agente entrenado contra una referencia objetiva.
 
-### Modelo de transición y dinámica del episodio
+## Modelo de transición y dinámica del episodio
 
-- **Transición**: determinista. `T(s' | s, a) = 1` para el `s'` definido por las reglas anteriores, `0` para todos los demás.
-- **Terminación**: el episodio termina (`terminated = True`) al alcanzar `goal`. Si se exceden 200 pasos sin llegar, se trunca (`truncated = True`); la truncación **no** corta el bootstrap de Q-learning porque no es un estado terminal real.
-- **Factor de descuento sugerido**: `γ = 0.99` para que el bonus terminal mantenga influencia hacia atrás a lo largo de los 25 pasos del camino óptimo (`0.99²⁴ ≈ 0.79`).
+- **Transición.** Determinista: $T(s' \mid s, a) = 1$ para el $s'$ definido en §2 y $0$ en los demás.
+- **Terminación.** El episodio termina ($\texttt{terminated}=\texttt{True}$) al alcanzar $s_T$. Si se exceden $200$ pasos sin llegar, se trunca ($\texttt{truncated}=\texttt{True}$); la truncación **no** corta el *bootstrap* de Q-learning porque no es un estado terminal real.
+- **Factor de descuento.** Adoptamos $\gamma = 0.99$ para que la señal terminal mantenga influencia a lo largo de los $25$ pasos del camino óptimo: $\gamma^{24} \approx 0.79$.
 
 ## Referencias visuales
 
-- `notebooks/01_exploration.ipynb` carga el laberinto y reproduce la figura del enunciado, además de calcular y dibujar el camino óptimo BFS (referencia de evaluación).
-- `notebooks/02_experiments.ipynb` entrena el agente y produce las gráficas de aprendizaje y el GIF del comportamiento aprendido.
+- `notebooks/01_exploration.ipynb` carga el laberinto, reproduce la figura del enunciado y calcula el camino óptimo BFS que sirve de referencia de evaluación.
+- `notebooks/02_experiments.ipynb` entrena al agente y produce las gráficas de aprendizaje y el GIF del comportamiento aprendido.
