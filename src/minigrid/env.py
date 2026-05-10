@@ -1,15 +1,24 @@
 """Ambiente DoorKey con bola bloqueando la puerta.
 
-Envuelve un entorno de MiniGrid (`BlockedUnlockPickup`) y expone una API
-discreta apropiada para Q-learning tabular: estado codificado como tupla
-hashable, conjunto fijo de acciones, recompensa con shaping por subtareas.
+Envuelve `MiniGrid-BlockedUnlockPickup-v0` y expone una API discreta para
+Q-learning tabular. El estado es la tupla de 8 componentes documentada en
+`docs/partial.tex` (Sec. 3, ec. 1):
+
+    s = (pos, direction, carrying, ball_moved,
+         key_picked, door_open, key_dropped, box_picked)
+
+Las tres últimas banderas (`key_picked`, `key_dropped`, `box_picked`) son
+banderas de progreso del episodio: una vez pasan a True, no vuelven a
+False. Forman parte del estado para que el shaping "primera vez" sea
+Markoviano sobre `(s, a, s')`. Sin ellas, la misma transición producía
+recompensas distintas según la historia previa del episodio.
 
 Diseño:
-    - `get_state` es puro: deriva la tupla a partir del entorno, no muta
-      contadores de progreso.
-    - El registro de subtareas alcanzadas vive en `self._achieved` y solo
-      se actualiza dentro de `_shape_reward`, lo que evita acoplar
-      codificación del estado con tracking de progreso.
+    - `_achieved` es la fuente de verdad de las tres flags persistentes.
+    - `get_state()` lee `_achieved` (no muta).
+    - `_shape_reward()` muta `_achieved` antes de retornar la recompensa,
+      de modo que la próxima llamada a `get_state()` ya vea las flags
+      actualizadas.
 """
 
 from __future__ import annotations
@@ -18,19 +27,18 @@ import gymnasium as gym
 import minigrid  # noqa: F401  # registra los entornos MiniGrid al importar
 
 
-# Acciones de MiniGrid que usa el agente
+# Acciones discretas de MiniGrid usadas por el agente.
 ACTIONS = {
     0: "left",      # girar a la izquierda
     1: "right",     # girar a la derecha
     2: "forward",   # avanzar
-    3: "pickup",    # recoger objeto (llave o bola)
+    3: "pickup",    # recoger objeto
     4: "drop",      # soltar objeto
     5: "toggle",    # abrir/cerrar puerta
 }
 
-# Costo por paso. Se elige pequeño (1e-3) frente a los bonus por subtarea
-# (suma máxima +2.80) para que el shaping no quede dominado por el costo
-# acumulado de un episodio largo (576 pasos × 1e-3 = 0.576).
+# Costo por paso. Pequeño (1e-3) frente al máximo de bonus (+2.80) para
+# que un episodio largo (576 pasos × 1e-3 = 0.576) no domine al shaping.
 STEP_COST = -0.001
 
 # Bonificaciones por subtarea (una sola vez por episodio).
@@ -43,7 +51,11 @@ BONUS_GOAL = 1.00
 
 
 class DoorKeyEnv:
-    def __init__(self, env_id: str = "MiniGrid-BlockedUnlockPickup-v0", seed: int | None = None):
+    def __init__(
+        self,
+        env_id: str = "MiniGrid-BlockedUnlockPickup-v0",
+        seed: int | None = None,
+    ):
         self.env = gym.make(env_id, render_mode="rgb_array")
         self.seed = seed
         self._initial_ball_pos: tuple[int, int] | None = None
@@ -51,13 +63,18 @@ class DoorKeyEnv:
         self.reset()
 
     def reset(self):
+        # Inicializar achievements ANTES del primer get_state(), porque
+        # las flags forman parte del estado.
+        self._achieved = self._fresh_achievements()
         obs, info = self.env.reset(seed=self.seed)
         self._initial_ball_pos = self._find_object("ball")
-        self._achieved = self._fresh_achievements()
         return self.get_state(), info
 
     def step(self, action: int):
         obs, reward, terminated, truncated, info = self.env.step(action)
+        # _shape_reward muta self._achieved; debe ejecutarse antes de
+        # llamar a get_state() para que la nueva tupla refleje las flags
+        # recién levantadas.
         shaped = self._shape_reward(reward, terminated)
         return self.get_state(), shaped, terminated, truncated, info
 
@@ -74,25 +91,35 @@ class DoorKeyEnv:
     # ------- Estado -------
 
     def get_state(self) -> tuple:
-        """Codifica el estado como tupla hashable para indexar la Q-tabla.
+        """Codifica el estado como tupla hashable de 8 componentes.
 
         Componentes:
             pos            -- (x, y) posición del agente.
             direction      -- 0..3 (E, S, W, N).
-            carrying_type  -- "none" | "key" | "ball" | "box". Distingue qué
-                              objeto carga el agente *ahora*. Es la pieza
-                              clave que la primera versión no tenía: con un
-                              flag sticky de `has_key`, los estados "cargo
-                              la bola" y "ya solté la bola" se confundían y
-                              la política no podía aprender la secuencia.
+            carrying       -- "none" | "key" | "ball" | "box".
             ball_moved     -- True si la bola ya no está en su posición
                               inicial (o el agente la carga).
+            key_picked     -- True si el agente recogió la llave en algún
+                              momento del episodio (persistente).
             door_open      -- True si la puerta está abierta.
+            key_dropped    -- True si el agente soltó la llave después de
+                              abrir la puerta (persistente).
+            box_picked     -- True si el agente cargó la caja al menos una
+                              vez (persistente).
         """
         unwrapped = self.env.unwrapped
         pos = tuple(unwrapped.agent_pos)
         direction = int(unwrapped.agent_dir)
-        return (pos, direction, self._carrying_type(), self._ball_has_moved(), self._is_door_open())
+        return (
+            pos,
+            direction,
+            self._carrying_type(),
+            self._ball_has_moved(),
+            self._achieved["key_picked"],
+            self._is_door_open(),
+            self._achieved["key_dropped"],
+            self._achieved["box_picked"],
+        )
 
     # ------- Shaping de recompensa -------
 
@@ -100,7 +127,7 @@ class DoorKeyEnv:
         reward = STEP_COST
 
         # Bonus terminal: MiniGrid devuelve base_reward > 0 únicamente al
-        # recoger la caja objetivo (éxito). En cualquier otro caso es 0.
+        # recoger la caja objetivo (éxito).
         if terminated and base_reward > 0:
             reward += BONUS_GOAL
 
